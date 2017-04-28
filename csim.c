@@ -37,14 +37,14 @@ void printUsage(void);
 cache buildCache(int setIndexBits, int associativity, int numSets);
 cache readTrace(FILE *fpTrace, int isVerbose, int setIndexBits, int associativity, int blockBits);
 void setLine(line *myline, unsigned long address, int setIndexBits, int blockBits, int *currentIndex);
-void clearCache(cache mycache, int numSets);
+void clearCache(cache mycache, int associativity, int numSets);
 line* emptyLine(cache mycache, int associativity, int numSets);
 line* getLRU (cache mycache, int associativity, int numSets, int currentIndex);
 unsigned long getTag(unsigned long address, int setIndexBits, int blockBits);
 line* getLine(cache mycache, int associativity, int numSets, unsigned long tag);
 void testcache (cache mycache, int associativity, int numSets);
 
-//Todo run the trace simulation
+
 
 // notes for operating on cache
 // check for valid lines with given tag
@@ -209,7 +209,7 @@ int main(int argc, char *argv[])
 
     // readTrace(fpTrace, isVerbose, setIndexBits, associativity, blockBits);
 	
-	clearCache(mycache, numSets);
+	clearCache(mycache, associativity,  numSets);
     printSummary(hit_count, miss_count, eviction_count);
     fclose(fpTrace);
     return 0;
@@ -250,9 +250,13 @@ cache readTrace(FILE *fpTrace, int isVerbose, int setIndexBits, int associativit
 cache buildCache(int setIndexBits, int associativity, int numSets) {
 	cache new_cache; // new cache 
 	new_cache.sets = (cache_set **) malloc (numSets * sizeof(cache_set*)); 
-
 	for (int setIndex = 0; setIndex < numSets; setIndex++){
-		new_cache.sets[setIndex]->lines = (line **) malloc(associativity * sizeof(line*)); 	
+		printf("address of sets[%d]: %p\n", setIndex, &(new_cache.sets[setIndex]));
+	}
+	(new_cache.sets[0]->lines) = (line **) malloc (associativity * sizeof(line*));
+	/*
+	for (int setIndex = 0; setIndex < numSets; setIndex++){
+		new_cache.sets[setIndex]->lines = (line **) malloc (associativity * sizeof(line*)); 	
 		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
 			line* myline = malloc(sizeof(line));  // lines in new cache 
 			myline->valid =0; 
@@ -261,21 +265,35 @@ cache buildCache(int setIndexBits, int associativity, int numSets) {
 			myline->lruIndex = -1; 
 			new_cache.sets[setIndex]->lines[lineIndex]= myline; //initiaze all variables in line struct
 		}
-	}
+		
+	}*/
+	
 	
 	return new_cache; 
 
 }
 
 /* call free function to clean up cache after main is run*/
-void clearCache(cache mycache, int numSets) {
-	for (int setIndex = 0; setIndex < numSets; setIndex ++){
-		if(mycache.sets[setIndex]->lines !=NULL){
-			free(mycache.sets[setIndex]->lines); //free line 
+void clearCache(cache mycache, int associativity, int numSets) {
+	
+	// free each line
+	for (int setIndex = 0; setIndex < numSets; setIndex++){
+		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
+			if(mycache.sets[setIndex]->lines[lineIndex] !=NULL){
+				free(mycache.sets[setIndex]->lines[lineIndex]); // free each line 
+			}
 		}
-
 	}
-	if(mycache.sets !=NULL){
+	
+	// free lines allocated to set
+	for (int setIndex = 0; setIndex < numSets; setIndex++){
+		if(mycache.sets[setIndex]->lines !=NULL) {
+			free(mycache.sets[setIndex]->lines); // free each array of lines 
+		}
+	}
+	
+	// free sets
+	if(mycache.sets != NULL){
 		free(mycache.sets); //free sets 
 	}
 
@@ -348,18 +366,4 @@ void testcache (cache mycache, int associativity, int numSets) {
 	}
 	return;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
