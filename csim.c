@@ -25,14 +25,12 @@ typedef struct {
 
 // cache_set structure contains an array of line and the LRU index
 typedef struct {
-	line *lines;
-
+	line** lines;
 } cache_set;
 
 // cache structure contains an array of cache_set
 typedef struct {
-	cache_set *sets;
-
+	cache_set** sets;
 } cache;
 
 void printUsage(void);
@@ -40,9 +38,11 @@ cache buildCache(int setIndexBits, int associativity, int numSets);
 cache readTrace(FILE *fpTrace, int isVerbose, int setIndexBits, int associativity, int blockBits);
 void setLine(line *myline, unsigned long address, int setIndexBits, int blockBits, int *currentIndex);
 void clearCache(cache mycache, int numSets);
-line emptyLine(cache mycache, int associativity, int numSets);
-line getLRU (cache mycache, int associativity, int numSets, int currentIndex);
+line* emptyLine(cache mycache, int associativity, int numSets);
+line* getLRU (cache mycache, int associativity, int numSets, int currentIndex);
 unsigned long getTag(unsigned long address, int setIndexBits, int blockBits);
+line* getLine(cache mycache, int associativity, int numSets, unsigned long tag);
+void testcache (cache mycache, int associativity, int numSets);
 
 //Todo run the trace simulation
 
@@ -64,7 +64,7 @@ int main(int argc, char *argv[])
 
 	int numSets;
 	cache mycache;
-	line myline;
+	line *myline;
 
     if (argc < 9 || argc > 11) {
 		printf("Invalid arguments passed too csim\n");
@@ -176,29 +176,36 @@ int main(int argc, char *argv[])
 	char operation;
     unsigned long address;
     int size;
-    if (fscanf(fpTrace," %c %lx, %d", &operation, &address, &size) > 0) {
+    while (fscanf(fpTrace," %c %lx, %d", &operation, &address, &size) > 0) {
+		// TODO delete - for testing
+		testcache(mycache, associativity, numSets);
 		unsigned long tag = getTag(address, setIndexBits, blockBits);
 		// TODO search for tag within cache
-	
-		// TODO if found, hit++
-		
-		// tag not found within cache (miss)
-		// try to get empty line from cache
-		myline = emptyLine(mycache, associativity, numSets);
-		if (myline.valid != 1) { // check if empty line was found
-			// no empty lines in cache, get least recently used line (evict)
-			myline = getLRU (mycache, associativity, numSets, currentIndex);
+		/* assuming tag is stored correctly within cache */
+		myline = getLine(mycache, associativity, numSets, tag);
+		if (myline != NULL) { // check if line with tag was found in cache
+			hit_count++;
+		} else {
+			miss_count++; // tag not found within cache
+			// try to get empty line from cache
+			myline = emptyLine(mycache, associativity, numSets);
+			if (myline != NULL) { // check if empty line was found
+				// no empty lines in cache, get least recently used line (evict)
+				myline = getLRU (mycache, associativity, numSets, currentIndex);
+				eviction_count++;
+				if (myline == NULL) {
+					printf("oops...\n");
+				}
+			}
 		}
 		// at this point myline contains a line from our cache
 		// set line
-		setLine(&myline, address, setIndexBits, blockBits, &currentIndex);
+		setLine(myline, address, setIndexBits, blockBits, &currentIndex);
 		
 		if (isVerbose) {
 			printf("%c %lx,%d\n", operation, address, size);
 		}
 	}
-	
-
 
     // readTrace(fpTrace, isVerbose, setIndexBits, associativity, blockBits);
 	
@@ -242,16 +249,17 @@ cache readTrace(FILE *fpTrace, int isVerbose, int setIndexBits, int associativit
 /*build a cache given s, E and n*/
 cache buildCache(int setIndexBits, int associativity, int numSets) {
 	cache new_cache; // new cache 
-    line myline;  // lines in new cache 
-	new_cache.sets = (cache_set *) malloc (numSets * sizeof(cache_set)); 
+	new_cache.sets = (cache_set **) malloc (numSets * sizeof(cache_set*)); 
 
 	for (int setIndex = 0; setIndex < numSets; setIndex++){
-		new_cache.sets[setIndex].lines = (line *) malloc(associativity * sizeof(line)); 	
+		new_cache.sets[setIndex]->lines = (line **) malloc(associativity * sizeof(line*)); 	
 		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
-			myline.valid =0; 
-			myline.tag =0; 
-			myline.setIndex =0; 
-			new_cache.sets[setIndex].lines[lineIndex]= myline; //initiaze all variables in line struct
+			line* myline = malloc(sizeof(line));  // lines in new cache 
+			myline->valid =0; 
+			myline->tag =0; 
+			myline->setIndex =0;
+			myline->lruIndex = -1; 
+			new_cache.sets[setIndex]->lines[lineIndex]= myline; //initiaze all variables in line struct
 		}
 	}
 	
@@ -262,8 +270,8 @@ cache buildCache(int setIndexBits, int associativity, int numSets) {
 /* call free function to clean up cache after main is run*/
 void clearCache(cache mycache, int numSets) {
 	for (int setIndex = 0; setIndex < numSets; setIndex ++){
-		if(mycache.sets[setIndex].lines !=NULL){
-			free(mycache.sets[setIndex].lines); //free line 
+		if(mycache.sets[setIndex]->lines !=NULL){
+			free(mycache.sets[setIndex]->lines); //free line 
 		}
 
 	}
@@ -274,31 +282,47 @@ void clearCache(cache mycache, int numSets) {
 }
 
 /* find an empty line in a set by checking the valid, 0 is empty, 1 is filled*/
-line emptyLine(cache mycache, int associativity, int numSets){
-	line myline; // line with lru index
+line* emptyLine(cache mycache, int associativity, int numSets){
+	line* myline = NULL; // line with lru index
 	for (int setIndex = 0; setIndex < numSets; setIndex++){
 		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
-			if (mycache.sets[setIndex].lines[lineIndex].valid==0) { // check if the line is empty
-				myline = mycache.sets[setIndex].lines[lineIndex];
+			if (mycache.sets[setIndex]->lines[lineIndex]->valid==0) { // check if the line is empty
+				myline = mycache.sets[setIndex]->lines[lineIndex];
 			}
 		}
 	} 
 	return myline;
 }
 
-line getLRU (cache mycache, int associativity, int numSets, int currentIndex) {
+line* getLRU (cache mycache, int associativity, int numSets, int currentIndex) {
 	int lru = currentIndex; // initialized to most recently used index
-	line lruLine; // line with lru index
+	line* lruLine = NULL; // line with lru index
 	for (int setIndex = 0; setIndex < numSets; setIndex++){
 		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
-			line currentline = mycache.sets[setIndex].lines[lineIndex];
-			if (currentline.lruIndex < lru) { // less recently used index found
-				lru = currentline.lruIndex;
+			line* currentline = mycache.sets[setIndex]->lines[lineIndex];
+			if (currentline->lruIndex < lru) { // less recently used index found
+				lru = currentline->lruIndex;
 				lruLine = currentline;
 			}
 		}
 	} 
 	return lruLine;
+}
+
+/* 
+Get line from cache if line with specified tag is present
+Otherwise, return empty line
+*/
+line* getLine(cache mycache, int associativity, int numSets, unsigned long tag) {
+	for (int setIndex = 0; setIndex < numSets; setIndex++) {
+		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++){
+			line* currentline = mycache.sets[setIndex]->lines[lineIndex];
+			if (currentline->tag == tag) {
+				return currentline;
+			}
+		}
+	} 
+	return NULL; //return NULL if line with specified tag is not found
 }
 
 void setLine(line *myline, unsigned long address, int setIndexBits, int blockBits, int *currentIndex) {
@@ -312,6 +336,30 @@ void setLine(line *myline, unsigned long address, int setIndexBits, int blockBit
 unsigned long getTag(unsigned long address, int setIndexBits, int blockBits) {
 	return (address >> (setIndexBits + blockBits));
 }
+
+void testcache (cache mycache, int associativity, int numSets) {
+	printf("\t set index:\tline index\tvalid:\tset index\ttag\tlruIndex\n");
+	for (int setIndex = 0; setIndex < numSets; setIndex++) {
+		for (int lineIndex = 0; lineIndex < associativity; lineIndex ++) {
+			line* currentline = mycache.sets[setIndex]->lines[lineIndex];
+			printf("\t%d\t\t%d\t\t%d\t%lx\t\t%lx\t%d\n", setIndex, lineIndex,
+				currentline->valid, currentline->setIndex, currentline->tag, currentline->lruIndex);
+		}
+	}
+	return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
